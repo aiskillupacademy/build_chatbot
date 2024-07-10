@@ -75,13 +75,13 @@ else:
     company_brief = ""
 prompt = chatbot_prompt(company_brief)
 sys_prompt = prompt.content
-sys_prompt = sys_prompt + "\n\n Don't give examples. \n\n If you don't know the answer then just say 'I don't know.'."
-print(sys_prompt)
+sys_prompt = sys_prompt + "\n\n Don't answer anything outside of the context or details you have. \n\n Don't give examples. \n\n Try to use bullet points sometimes when necessary. \n\n Explain points you make with your knowledge. \n\n If you don't know the answer then just say 'I don't know.'."
+# print(sys_prompt)
 system_prompt = SystemMessagePromptTemplate.from_template(sys_prompt)
 human_template = """{input}"""
 human_prompt = HumanMessagePromptTemplate.from_template(human_template)
 prompt = ChatPromptTemplate.from_messages([system_prompt, human_prompt])
-llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0.3)
+llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0.6)
 # llm = ChatGroq(model="llama3-70b-8192", temperature=0.3)
 chain = prompt | llm
 
@@ -93,16 +93,16 @@ if enable_knowledge_graph:
     if uploaded_files:
         text = extraxt_doc_text(uploaded_files)
         text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 10)
-        print(text)
+        # print(text)
         docs = text_splitter.split_documents(text)
         embedding = OpenAIEmbeddings()
         db = FAISS.from_documents(docs, embedding)
         retriever = db.as_retriever(search_kwargs={"k":2, "score_threshold": 0.7})
-        template = """You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
+        template = """Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
         Question: {question} 
         Context: {context} 
         Answer:"""
-        template = inst + template
+        template = inst + sys_prompt + template
         prompt = ChatPromptTemplate.from_template(template)
         rag_chain = (
                     {"context": retriever | format_docs, "question": RunnablePassthrough()}
