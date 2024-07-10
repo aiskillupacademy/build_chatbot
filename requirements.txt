@@ -4,4 +4,4 @@ langchain-openai
 langchain-core
 langchain-groq
 pymupdf4llm
-faiss
+faiss-cpu
