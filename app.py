@@ -73,8 +73,9 @@ uploaded_files = st.sidebar.file_uploader("Upload files", accept_multiple_files=
 if company_details!= "":
     company_brief = company_details
 else:
-    with open("companybrief.txt") as f:
-        company_brief = f.read()
+    # with open("companybrief.txt") as f:
+    #     company_brief = f.read()
+    company_brief = ""
 prompt = chatbot_prompt(company_brief)
 sys_prompt = prompt.content
 sys_prompt = sys_prompt + "\n\n Don't give examples. \n\n If you don't know the answer then just say 'I don't know.'."
