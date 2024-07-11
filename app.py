@@ -81,6 +81,15 @@ def suggest_questions(message, role, company_brief):
     ques = eval(questions)
     return ques
 
+def extract_sitemap_urls(url):
+    sitemap = "/sitemap.xml"
+    sitemap_url = url + sitemap
+    response = requests.get(sitemap_url)
+    xml_root = ElementTree.fromstring(response.content)
+    namespaces = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+    urls = [elem.text for elem in xml_root.findall('.//ns:loc', namespaces)]
+    return urls
+
 st.title("Build Chatbot")
 
 st.sidebar.title("Configure")
