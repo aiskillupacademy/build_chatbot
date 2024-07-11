@@ -181,6 +181,28 @@ if enable_knowledge_graph:
                     )
         # print(docs)
 
+temp = """
+You will be assigned a role and given a company brief.
+role: {role}
+company brief: {company_brief}
+Your task is to generate 10 questions a user can ask you about the company.
+The questions should be related to the company and your role.
+The questions should be such that it can clears user's doubt about the company.
+Give your output as a list of strings.
+Output format: 
+["","","","","","","","","",""]
+"""
+ques_prompt = ChatPromptTemplate.from_template(temp)
+chain1 = ques_prompt | llm
+questions = chain1.invoke({"role": role, "company_brief": company_brief})
+response = questions.content
+print(response)
+start = response.find('[')
+end = response.find(']')
+q = response[start:end+1]
+question = eval(q)
+st.sidebar.write(question)
+
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
