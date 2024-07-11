@@ -3,5 +3,7 @@ langchain-community
 langchain-openai
 langchain-core
 langchain-groq
+langchain-experimental
 pymupdf4llm
 faiss-cpu
+pandas
