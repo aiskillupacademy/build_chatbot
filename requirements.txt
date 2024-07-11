@@ -7,3 +7,4 @@ langchain-experimental
 pymupdf4llm
 faiss-cpu
 pandas
+tabulate
