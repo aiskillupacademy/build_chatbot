@@ -196,11 +196,14 @@ ques_prompt = ChatPromptTemplate.from_template(temp)
 chain1 = ques_prompt | llm
 questions = chain1.invoke({"role": role, "company_brief": company_brief})
 response = questions.content
-print(response)
+# print(response)
 start = response.find('[')
 end = response.find(']')
 q = response[start:end+1]
-question = eval(q)
+try:
+    question = eval(q)
+except:
+    question = response
 st.sidebar.write(question)
 
 # Initialize chat history
