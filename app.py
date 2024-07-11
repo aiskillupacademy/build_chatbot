@@ -51,11 +51,80 @@ def extraxt_doc_text(uploaded_files):
         os.remove(temp_file_path)
     return documents
 
+def suggest_questions(message):
+    suggest_input = """Given the user query, your task is to generate 3 follow up questions that the user can ask further.
+        Suggest Related Questions:
+
+        Propose relevant follow-up questions the user might want to ask next.
+        Ensure suggestions are connected to the initial query and offer deeper insights or related information.
+        Broaden the Topic:
+
+        Include questions that expand the conversation to related topics or broader areas of interest.
+        Aim to keep the user engaged and curious.
+        Example Structure:
+
+        Initial Response:
+
+        "Thank you for your question about [topic]. Based on your query, here's the information you need: [response]."
+        Suggest Related Questions:
+
+        "You might be interested in asking about [related aspect]."
+        "Consider exploring [related topic] with questions like [example question]."
+        Broaden the Topic:
+
+        "To expand your understanding, you could ask about [broader category or advanced topic]."
+        "Another area to consider might be [related area]. You might ask, [example question]."
+        Example Dialogue:
+
+        User: "How can I improve my website’s SEO?"
+
+        Chatbot:
+        "Thank you for your question about improving your website's SEO. Here are some effective strategies:
+
+        Optimize your content with relevant keywords.
+        Ensure your website is mobile-friendly.
+        Use descriptive meta tags.
+        Build high-quality backlinks.
+
+        You might be interested in asking about:
+
+        How to find the best keywords for your content.
+        The impact of mobile-friendliness on SEO rankings.
+        Consider exploring these related topics:
+
+        What are the best tools for analyzing SEO performance?
+        How does social media influence SEO?
+        To expand your understanding, you could ask about:
+
+        Advanced SEO techniques for competitive niches.
+        The latest trends in SEO for the upcoming year.
+
+        Query: {query}
+
+        generate only 3 questions.
+        Output should be a python list of strings. Only give the python list as output, nothing else.\n
+        Output format:\n
+
+        ["","",""]
+
+        """
+    suggest_prompt = ChatPromptTemplate.from_template(suggest_input)
+    llm = ChatGroq(model="llama3-70b-8192", temperature=0.3)
+    chain_sug = suggest_prompt | llm
+    res_suggest = chain_sug.invoke({"query":message})
+    response = res_suggest.content
+    start = response.find('[')
+    end = response.find(']')
+    questions = response[start:end+1]
+    ques = eval(questions)
+    return ques
+
 st.title("Build Chatbot")
 
 st.sidebar.title("Configure")
+role = st.sidebar.text_input("Add Role","")
 company_details = st.sidebar.text_input("Give the company details.")
-welcome_message = st.sidebar.text_input("Welcome chat message for users.")
+# welcome_message = st.sidebar.text_input("Welcome chat message for users.")
 
 # st.sidebar.header("Chat Features")
 # enable_voice_dictation = st.sidebar.checkbox('Enable voice dictation', value=False)
@@ -75,7 +144,7 @@ else:
     company_brief = ""
 prompt = chatbot_prompt(company_brief)
 sys_prompt = prompt.content
-sys_prompt = sys_prompt + "\n\n Don't answer anything outside of the context or details you have. \n\n Don't give examples. \n\n Try to use bullet points sometimes when necessary. \n\n Explain points you make with your knowledge. \n\n If you don't know the answer then just say 'I don't know.'."
+sys_prompt = role + sys_prompt + "\n\n Don't answer anything outside of the context or details you have. \n\n Don't give examples. \n\n Try to use bullet points sometimes when necessary. \n\n Explain points you make with your knowledge. \n\n If you don't know the answer then just say 'I don't know.'."
 # print(sys_prompt)
 system_prompt = SystemMessagePromptTemplate.from_template(sys_prompt)
 human_template = """{input}"""
@@ -135,9 +204,13 @@ if user_input := st.chat_input("Ask a question"):
         res = chain.invoke(user_input)
         full_res = res.content
     
+    ques = suggest_questions(user_input)
+    
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
         st.markdown(full_res)
+
+    st.write(ques)
     # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": full_res})
 
