@@ -11,6 +11,11 @@ from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 from langchain_core.documents import Document
 import pymupdf4llm
+import pandas as pd
+from langchain.agents.agent_types import AgentType
+from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
+import requests
+from xml.etree import ElementTree
 
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
