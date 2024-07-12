@@ -16,6 +16,10 @@ from langchain.agents.agent_types import AgentType
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
 import requests
 from xml.etree import ElementTree
+from langchain_community.document_loaders.csv_loader import CSVLoader
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
+from langchain_community.document_loaders import SeleniumURLLoader
 
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
@@ -90,6 +94,37 @@ def extract_sitemap_urls(url):
     urls = [elem.text for elem in xml_root.findall('.//ns:loc', namespaces)]
     return urls
 
+def find_url(urls, user_query):
+    docs = [Document(url) for url in urls]
+    embeddings = OpenAIEmbeddings()
+    url_texts = [doc.page_content for doc in docs]
+    url_embeddings = embeddings.embed_documents(url_texts)
+    query_embedding = embeddings.embed_query(user_query)
+    index = FAISS.from_documents(docs, embeddings)
+    index.add_embeddings(list(zip(url_texts, url_embeddings)))
+    similar_urls = index.similarity_search_with_score(query_embedding, top_k=1)
+    return similar_urls[0][0].page_content
+
+def create_rag_chain(documents):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 10)
+    docs = text_splitter.split_documents(documents)
+    embedding = OpenAIEmbeddings()
+    db = FAISS.from_documents(docs, embedding)
+    retriever = db.as_retriever(search_kwargs={"k":2, "score_threshold": 0.7})
+    template = """Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
+    Question: {question} 
+    Context: {context} 
+    Answer:"""
+    template = inst + sys_prompt + template
+    prompt = ChatPromptTemplate.from_template(template)
+    rag_chain = (
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | llm
+                | StrOutputParser()
+                )
+    return rag_chain
+
 st.title("Build Chatbot")
 
 st.sidebar.title("Configure")
@@ -106,16 +141,19 @@ st.sidebar.header("Knowledge Graph")
 enable_knowledge_graph = st.sidebar.toggle("Enable", value=False)
 instructions = st.sidebar.text_input("Add instructions")
 uploaded_files = st.sidebar.file_uploader("Upload files", accept_multiple_files=True)
+urls = st.sidebar.text_input("Add URL")
 
 st.sidebar.header("CSV Loader")
 enable_csv = st.sidebar.toggle("Enable CSV", value=False)
+chain_type = st.sidebar.toggle("Use Retrieval", value=False)
 csv_files = st.sidebar.file_uploader("Upload .csv files only", accept_multiple_files=False)
 
 st.sidebar.header("Sitemap Loader")
+enable_sitemap = st.sidebar.toggle("Enable Sitemap", value=False)
 url = st.sidebar.text_input("Enter URL.")
-if st.sidebar.button("Get Sitemap"):
-    urls = extract_sitemap_urls(url)
-    st.sidebar.write(urls)
+if url:
+    sitemap_urls = extract_sitemap_urls(url)
+    st.sidebar.write(sitemap_urls)
 
 if company_details!= "":
     company_brief = company_details
@@ -140,31 +178,25 @@ if enable_knowledge_graph:
         inst = f"""{instructions}"""
     else:
         inst = """ """
+    documents = []
     if uploaded_files:
         text = extraxt_doc_text(uploaded_files)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 10)
-        # print(text)
-        docs = text_splitter.split_documents(text)
-        embedding = OpenAIEmbeddings()
-        db = FAISS.from_documents(docs, embedding)
-        retriever = db.as_retriever(search_kwargs={"k":2, "score_threshold": 0.7})
-        template = """Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
-        Question: {question} 
-        Context: {context} 
-        Answer:"""
-        template = inst + sys_prompt + template
-        prompt = ChatPromptTemplate.from_template(template)
-        rag_chain = (
-                    {"context": retriever | format_docs, "question": RunnablePassthrough()}
-                    | prompt
-                    | llm
-                    | StrOutputParser()
-                    )
+        documents.extend(text)
+    if urls:
+        loader = SeleniumURLLoader([urls])
+        data = loader.load()
+        documents.extend(data)
         
 if enable_csv:
     if csv_files:
         df = pd.read_csv(csv_files)
-        agent = create_pandas_dataframe_agent(llm, df, verbose=True, allow_dangerous_code=True, handle_parsing_errors=True)
+        agent = create_pandas_dataframe_agent(llm, df, verbose=True, agent_type=AgentType.OPENAI_FUNCTIONS, return_intermediate_steps=True, allow_dangerous_code=True, handle_parsing_errors=True)
+        loader = CSVLoader(csv_files, encoding="utf-8", csv_args={'delimiter': ','})
+        data = loader.load()
+        embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2', model_kwargs={'device': 'cpu'})
+        db = FAISS.from_documents (data, embeddings)
+        history = ""
+        chain = ConversationalRetrievalChain.from_llm(llm=llm, retriever=db.as_retriever())
 
 temp = """
 You will be assigned a role and given a company brief.
@@ -202,28 +234,33 @@ for message in st.session_state.messages:
 
 # React to user input
 if user_input := st.chat_input("Ask a question"):
-    # Display user message in chat message container
     st.chat_message("user").markdown(user_input)
-    # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    if enable_knowledge_graph and uploaded_files:
+    if enable_knowledge_graph and (uploaded_files!=[] or urls!=[] or enable_sitemap):
+        if enable_sitemap and url!="":
+            sim_url = find_url(sitemap_urls, user_input)
+            loader = SeleniumURLLoader([sim_url])
+            data = loader.load()
+            documents.extend(data)
+        rag_chain = create_rag_chain(documents)
         res = rag_chain.invoke(user_input)
         full_res = res
     elif enable_csv and csv_files:
-        res = agent.invoke(user_input)
-        full_res = res['output']
+        if chain_type:
+            res = chain({"question": "Tell me about the data.", "chat_history": history})
+            full_res = res['answer']
+        else:
+            res = agent.invoke(user_input)
+            full_res = res['output']
     else:
         res = chain.invoke(user_input)
         full_res = res.content
     
     ques = suggest_questions(user_input, role, company_brief)
     
-    # Display assistant response in chat message container
     with st.chat_message("assistant"):
         st.markdown(full_res)
 
     st.write(ques)
-    # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": full_res})
-
