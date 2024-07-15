@@ -98,7 +98,10 @@ def suggest_questions(message, role, company_brief):
     start = response.find('[')
     end = response.find(']')
     questions = response[start:end+1]
-    ques = eval(questions)
+    try:
+        ques = eval(questions)
+    except:
+        ques = questions
     return ques
 
 def extract_sitemap_urls(url):
