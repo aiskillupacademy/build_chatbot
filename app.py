@@ -29,20 +29,36 @@ def format_docs(docs):
 
 def chatbot_prompt(company_brief):
     llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=1, max_tokens=2048)
-    prompt_template = """
-    You are an expert in system prompt generation for LLMs.
-    You will be given a company brief.
-    company brief: {company_brief}
-    Your task is to generate a prompt for an llm to work as a chatbot for this company using the company brief provided.
-    Make a detailed prompt telling the chatbot on how to answer user query aligning with the company brief.
-    Add details about how a company chatbot should work and converse with the user.
-    Try to add points and examples.
-    Your output should be the new generated prompt in a string.
-    New prompt: 
-    """
-    prompt = ChatPromptTemplate.from_template(prompt_template)
-    chain = prompt | llm
-    res = chain.invoke(company_brief)
+    if company_brief!="":
+        prompt_template = """
+        You are an expert in system prompt generation for LLMs.
+        You will be given a company brief.
+        company brief: {company_brief}
+        Your task is to generate a prompt for an llm to work as a chatbot for this company using the company brief provided.
+        Make a detailed prompt telling the chatbot on how to answer user query aligning with the company brief.
+        Add details about how a company chatbot should work and converse with the user.
+        Try to add points and examples.
+        Your output should be the new generated prompt in a string.
+        Don't give any header or footer.
+        New prompt: 
+        """
+        prompt = ChatPromptTemplate.from_template(prompt_template)
+        chain = prompt | llm
+        res = chain.invoke(company_brief)
+    else:
+        prompt_template = """
+        You are an expert in system prompt generation for LLMs.
+        Your task is to generate a prompt for an llm to work as a general chatbot.
+        Make a detailed prompt telling the chatbot on how to answer user query..
+        Add details about how a chatbot should work and converse with the user.
+        Try to add points and examples.
+        Your output should be the new generated prompt in a string.
+        Don't give any header or footer.
+        New prompt: 
+        """
+        prompt = ChatPromptTemplate.from_template(prompt_template)
+        chain = prompt | llm
+        res = chain.invoke({})
     return res
 
 def extraxt_doc_text(uploaded_files):
@@ -111,7 +127,10 @@ def create_rag_chain(documents):
     embedding = OpenAIEmbeddings()
     db = FAISS.from_documents(docs, embedding)
     retriever = db.as_retriever(search_kwargs={"k":2, "score_threshold": 0.7})
-    template = """Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
+    template = """Use the following pieces of retrieved context to answer the question. 
+    If you don't know the answer, just say that you don't know.
+    Based on the question decide the length of answer and answer. Make it long wherever required. 
+    Give answer in markdown format.
     Question: {question} 
     Context: {context} 
     Answer:"""
@@ -151,6 +170,25 @@ csv_files = st.sidebar.file_uploader("Upload .csv files only", accept_multiple_f
 st.sidebar.header("Sitemap Loader")
 enable_sitemap = st.sidebar.toggle("Enable Sitemap", value=False)
 url = st.sidebar.text_input("Enter URL.")
+
+if role!="":
+    template = """You are an expert in various professional roles. I will provide you with a job role, and your task is to elaborate on this role. 
+    Describe the responsibilities, required skills, and typical tasks associated with this role in a detailed and informative manner. 
+    Ensure that the description is clear and comprehensive, providing valuable information about how the role works.
+    Give in maximum 50 words.
+
+    Job role: {role}
+
+    Elaborate description of the role (only string):
+    """
+    prompt1 = ChatPromptTemplate.from_template(template)
+    chain2 = prompt1 | llm
+    e_role = chain2.invoke(role)
+    f_role = f"You are a {role}. {e_role.content}"
+    st.sidebar.write(f_role)
+else:
+    f_role = ""
+
 if url:
     sitemap_urls = extract_sitemap_urls(url)
     st.sidebar.write(sitemap_urls)
@@ -163,7 +201,7 @@ else:
     company_brief = ""
 prompt = chatbot_prompt(company_brief)
 sys_prompt = prompt.content
-sys_prompt = role + sys_prompt + "\n\n Don't answer anything outside of the context or details you have. \n\n Don't give examples. \n\n Try to use bullet points sometimes when necessary. \n\n Explain points you make with your knowledge. \n\n If you don't know the answer then just say 'I don't know.'."
+sys_prompt = f_role + sys_prompt + "\n\n Don't answer anything outside of the context or details you have. \n\n Don't give examples. \n\n Try to use bullet points sometimes when necessary. \n\n Explain points you make with your knowledge. \n\n If you don't know the answer then just say 'I don't know.'."
 # print(sys_prompt)
 system_prompt = SystemMessagePromptTemplate.from_template(sys_prompt)
 human_template = """{input}"""
@@ -198,20 +236,38 @@ if enable_csv:
         history = ""
         chain = ConversationalRetrievalChain.from_llm(llm=llm, retriever=db.as_retriever())
 
-temp = """
-You will be assigned a role and given a company brief.
-role: {role}
-company brief: {company_brief}
-Your task is to generate 10 questions a user can ask you about the company.
-The questions should be related to the company and your role.
-The questions should be such that it can clears user's doubt about the company.
-Give your output as a list of strings.
-Output format: 
-["","","","","","","","","",""]
-"""
-ques_prompt = ChatPromptTemplate.from_template(temp)
-chain1 = ques_prompt | llm
-questions = chain1.invoke({"role": role, "company_brief": company_brief})
+if enable_knowledge_graph:
+    temp = """
+    You will be assigned a role and given a company brief and a retrieved context.
+    role: {role}
+    company brief: {company_brief}
+    context: {context}
+    Your task is to generate 10 questions a user can ask you about the company.
+    The questions should be related to the company and your role.
+    The questions should be such that it can clears user's doubt about the company.
+    Amswer based on the context as well.
+    Give your output as a list of strings.
+    Output format: 
+    ["","","","","","","","","",""]
+    """
+    ques_prompt = ChatPromptTemplate.from_template(temp)
+    chain3 = ques_prompt | llm
+    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "context": documents})    
+else:
+    temp = """
+    You will be assigned a role and given a company brief.
+    role: {role}
+    company brief: {company_brief}
+    Your task is to generate 10 questions a user can ask you about the company.
+    The questions should be related to the company and your role.
+    The questions should be such that it can clears user's doubt about the company.
+    Give your output as a list of strings.
+    Output format: 
+    ["","","","","","","","","",""]
+    """
+    ques_prompt = ChatPromptTemplate.from_template(temp)
+    chain1 = ques_prompt | llm
+    questions = chain1.invoke({"role": f_role, "company_brief": company_brief})
 response = questions.content
 # print(response)
 start = response.find('[')
