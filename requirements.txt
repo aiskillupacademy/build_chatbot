@@ -8,3 +8,5 @@ pymupdf4llm
 faiss-cpu
 pandas
 tabulate
+llama-index
+openai

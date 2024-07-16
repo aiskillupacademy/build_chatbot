@@ -12,17 +12,18 @@ from langchain_groq import ChatGroq
 from langchain_core.documents import Document
 import pymupdf4llm
 import pandas as pd
-from langchain.agents.agent_types import AgentType
-from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
+from llama_index.experimental.query_engine import PandasQueryEngine
+from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from llama_index.core.agent import ReActAgent
+from llama_index.llms.openai import OpenAI
+from llama_index.core import PromptTemplate
 import requests
 from xml.etree import ElementTree
-from langchain_community.document_loaders.csv_loader import CSVLoader
-from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain_community.document_loaders import SeleniumURLLoader
 
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+llm = ChatGroq(model="llama3-70b-8192", temperature=0.5)
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
@@ -147,6 +148,65 @@ def create_rag_chain(documents):
                 )
     return rag_chain
 
+def csv_query_agent(df):
+    llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
+    instruction_str = """\
+        1. Convert the query to executable Python code using Pandas.
+        2. The final line of code should be a Python expression that can be called with the `eval()` function.
+        3. The code should represent a solution to the query.
+        4. PRINT ONLY THE EXPRESSION.
+        5. Do not quote the expression."""
+
+    new_prompt = PromptTemplate(
+        """\
+        You are working with a pandas dataframe in Python.
+        The name of the dataframe is `df`.
+        This is the result of `print(df.head())`:
+        {df_str}
+
+        Follow these instructions:
+        {instruction_str}
+        Query: {query_str}
+
+        Expression: """
+    )
+
+    context = """Purpose: The primary role of this agent is to assist users by providing accurate 
+                information """
+
+    # population_path = os.path.join("data", file)
+    # population_df = pd.read_csv(population_path)
+
+    template = """
+    You will be given a dataframe containing data from a csv file.
+    dataframe: {dataframe}
+    Give a 1-3 word summary overall describing the data.
+    give a string output.
+    """
+    prompt1 = ChatPromptTemplate.from_template(template)
+    chain = prompt1 | llm
+    summary = chain.invoke(df)
+    print(summary.content)
+
+    population_query_engine = PandasQueryEngine(
+        df=df, verbose=True, instruction_str=instruction_str
+    )
+    population_query_engine.update_prompts({"pandas_prompt": new_prompt})
+
+    tools = [
+        QueryEngineTool(
+            query_engine=population_query_engine,
+            metadata=ToolMetadata(
+                name="dataset",
+                description=summary.content,
+            ),
+        ),
+    ]
+
+    llm = OpenAI(model="gpt-3.5-turbo-0613")
+    agent = ReActAgent.from_tools(tools, llm=llm, verbose=True, context=context)
+    return agent
+
 st.title("Build Chatbot")
 
 st.sidebar.title("Configure")
@@ -228,16 +288,9 @@ if enable_knowledge_graph:
         data = loader.load()
         documents.extend(data)
         
-if enable_csv:
-    if csv_files:
+if enable_csv and csv_files:
         df = pd.read_csv(csv_files)
-        agent = create_pandas_dataframe_agent(llm, df, verbose=True, agent_type=AgentType.OPENAI_FUNCTIONS, return_intermediate_steps=True, allow_dangerous_code=True, handle_parsing_errors=True)
-        loader = CSVLoader(csv_files, encoding="utf-8", csv_args={'delimiter': ','})
-        data = loader.load()
-        embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2', model_kwargs={'device': 'cpu'})
-        db = FAISS.from_documents (data, embeddings)
-        history = ""
-        chain = ConversationalRetrievalChain.from_llm(llm=llm, retriever=db.as_retriever())
+        agent = csv_query_agent(df)
 
 if enable_knowledge_graph:
     temp = """
@@ -255,7 +308,24 @@ if enable_knowledge_graph:
     """
     ques_prompt = ChatPromptTemplate.from_template(temp)
     chain3 = ques_prompt | llm
-    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "context": documents})    
+    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "context": documents})
+elif enable_csv:
+    temp = """
+    You will be assigned a role and given a company brief and a dataframe from a csv data.
+    role: {role}
+    company brief: {company_brief}
+    dataframe: {dataframe}
+    Your task is to generate 10 questions a user can ask you about the company.
+    The questions should be related to the company and your role.
+    The questions should be such that it can clears user's doubt about the company.
+    Amswer based on the dataframe from a csv data as well.
+    Give your output as a list of strings.
+    Output format: 
+    ["","","","","","","","","",""]
+    """
+    ques_prompt = ChatPromptTemplate.from_template(temp)
+    chain3 = ques_prompt | llm
+    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "context": df})
 else:
     temp = """
     You will be assigned a role and given a company brief.
@@ -306,12 +376,11 @@ if user_input := st.chat_input("Ask a question"):
         res = rag_chain.invoke(user_input)
         full_res = res
     elif enable_csv and csv_files:
-        if chain_type:
-            res = chain({"question": "Tell me about the data.", "chat_history": history})
-            full_res = res['answer']
-        else:
-            res = agent.invoke(user_input)
-            full_res = res['output']
+        try:
+            res = agent.query(user_input)
+        except:
+            res = "Answer not found. Try again."
+        full_res = res
     else:
         res = chain.invoke(user_input)
         full_res = res.content
