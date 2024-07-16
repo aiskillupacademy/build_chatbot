@@ -227,7 +227,6 @@ urls = st.sidebar.text_input("Add URL")
 
 st.sidebar.header("CSV Loader")
 enable_csv = st.sidebar.toggle("Enable CSV", value=False)
-chain_type = st.sidebar.toggle("Use Retrieval", value=False)
 csv_files = st.sidebar.file_uploader("Upload .csv files only", accept_multiple_files=False)
 
 st.sidebar.header("Sitemap Loader")
@@ -325,7 +324,7 @@ elif enable_csv:
     """
     ques_prompt = ChatPromptTemplate.from_template(temp)
     chain3 = ques_prompt | llm
-    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "context": df})
+    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "dataframe": df})
 else:
     temp = """
     You will be assigned a role and given a company brief.
