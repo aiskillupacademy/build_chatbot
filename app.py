@@ -411,7 +411,24 @@ if enable_faq and faq_files:
     llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
     chain4 = prom | llm
 
-if enable_knowledge_graph:
+if enable_ytt:
+    temp = """
+    You will be assigned a role and given a company brief and a youtube transcript.
+    role: {role}
+    company brief: {company_brief}
+    transcript: {transcript}
+    Your task is to generate 10 questions a user can ask you about the company.
+    The questions should be related to the company and your role.
+    The questions should be such that it can clears user's doubt about the company.
+    Amswer based on the dataframe from a csv data as well.
+    Give your output as a list of strings.
+    Output format: 
+    ["","","","","","","","","",""]
+    """
+    ques_prompt = ChatPromptTemplate.from_template(temp)
+    chain3 = ques_prompt | llm
+    questions = chain3.invoke({"role": f_role, "company_brief": company_brief, "transcript": ytt})
+elif enable_knowledge_graph:
     temp = """
     You will be assigned a role and given a company brief and a retrieved context.
     role: {role}
