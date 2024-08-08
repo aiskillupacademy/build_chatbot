@@ -322,7 +322,10 @@ if enable_ytt:
     try:
         st.sidebar.write(ytt[0].page_content)
     except:
-        st.sidebar.write(ytt.page_content)
+        try:
+            st.sidebar.write(ytt.page_content)
+        except:
+            pass
     if ytt!="Transcript not found. Try another video URL.":
         yt_chain = create_rag_chain(ytt)
     else:
