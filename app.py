@@ -245,7 +245,7 @@ def youtube_transcripts(url):
             url, add_video_info=False, language=language_codes, translation="en",
         )
         doc = loader.load()
-        return(doc)
+        return(doc[0].page_content)
     except:
         print("Initial try failed. Trying to extract transcript from audio...")
         try:
@@ -262,7 +262,7 @@ def youtube_transcripts(url):
                     response_format="verbose_json",
                     )
                     doc = Document(transcription.text, metadata={"source": temp_file_path})
-                    return(doc)
+                    return(doc.page_content)
         except:
             return("Transcript not found. Try another video URL.")
 
@@ -319,12 +319,9 @@ else:
 
 if enable_ytt:
     ytt = youtube_transcripts(ytt_url)
-    try:
-        st.sidebar.write(ytt[0].page_content)
-    except:
-        st.sidebar.write(ytt.page_content)
+    st.sidebar.write(ytt)
     if ytt!="Transcript not found. Try another video URL.":
-        yt_chain = create_rag_chain(ytt)
+        yt_chain = create_rag_chain([Document(ytt)])
     else:
         st.write("Transcript not found. Try another video URL.")
 
