@@ -24,7 +24,6 @@ from langchain_community.document_loaders import YoutubeLoader
 from langchain_core.documents import Document
 import os
 import time
-from dotenv import load_dotenv, find_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
