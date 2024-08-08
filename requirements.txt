@@ -13,3 +13,5 @@ openai
 llama-index-experimental
 llama-index-core
 llama-index-llms-openai
+youtube-transcript-api
+pytubefix

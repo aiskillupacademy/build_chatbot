@@ -20,10 +20,28 @@ from llama_index.core import PromptTemplate
 import requests
 from xml.etree import ElementTree
 from langchain_community.document_loaders import SeleniumURLLoader
+from langchain_community.document_loaders import YoutubeLoader
+from langchain_core.documents import Document
+import os
+import time
+from dotenv import load_dotenv, find_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+from langchain import hub
+from pytubefix import YouTube
+from pytubefix.cli import on_progress
+import tempfile
+from groq import Groq
 
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 llm = ChatGroq(model="llama3-70b-8192", temperature=0.5)
+client = Groq()
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
@@ -138,7 +156,7 @@ def create_rag_chain(documents):
     Question: {question} 
     Context: {context} 
     Answer:"""
-    template = inst + sys_prompt + template
+    # template = inst + sys_prompt + template
     prompt = ChatPromptTemplate.from_template(template)
     rag_chain = (
                 {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -207,6 +225,48 @@ def csv_query_agent(df):
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=True, context=context)
     return agent
 
+def youtube_transcripts(url):
+    language_codes = [
+    "ab", "aa", "af", "ak", "sq", "am", "ar", "hy", "as", "ay", "az", "bn", "ba", "eu", 
+    "be", "bho", "bs", "br", "bg", "my", "ca", "ceb", "zh-Hans", "zh-Hant", "co", "hr", 
+    "cs", "da", "dv", "nl", "dz", "en", "eo", "et", "ee", "fo", "fj", "fil", "fi", 
+    "fr", "gaa", "gl", "lg", "ka", "de", "el", "gn", "gu", "ht", "ha", "haw", "iw", 
+    "hi", "hmn", "hu", "is", "ig", "id", "ga", "it", "ja", "jv", "kl", "kn", "kk", 
+    "kha", "km", "rw", "ko", "kri", "ku", "ky", "lo", "la", "lv", "ln", "lt", "luo", 
+    "lb", "mk", "mg", "ms", "ml", "mt", "gv", "mi", "mr", "mn", "mfe", "ne", "new", 
+    "nso", "no", "ny", "oc", "or", "om", "os", "pam", "ps", "fa", "pl", "pt", "pt-PT", 
+    "pa", "qu", "ro", "rn", "ru", "sm", "sg", "sa", "gd", "sr", "crs", "sn", "sd", 
+    "si", "sk", "sl", "so", "st", "es", "su", "sw", "ss", "sv", "tg", "ta", "tt", 
+    "te", "th", "bo", "ti", "to", "ts", "tn", "tum", "tr", "tk", "uk", "ur", "ug", 
+    "uz", "ve", "vi", "war", "cy", "fy", "wo", "xh", "yi", "yo", "zu", "en-US"
+    ]
+    try:
+        print("Trying to get the transcript directly...")
+        loader = YoutubeLoader.from_youtube_url(
+            url, add_video_info=False, language=language_codes, translation="en",
+        )
+        doc = loader.load()
+        return(doc)
+    except:
+        print("Initial try failed. Trying to extract transcript from audio...")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                yt = YouTube(url, on_progress_callback = on_progress)
+                print(yt.title)
+                ys = yt.streams.get_audio_only()
+                temp_file_path = ys.download(output_path=temp_dir, mp3=True)
+                print(temp_file_path)
+                with open(temp_file_path, "rb") as file:
+                    transcription = client.audio.transcriptions.create(
+                    file=(temp_file_path, file.read()),
+                    model="whisper-large-v3",
+                    response_format="verbose_json",
+                    )
+                    doc = Document(transcription.text, metadata={"source": temp_file_path})
+                    return(doc)
+        except:
+            return("Transcript not found. Try another video URL.")
+
 st.title("Build Chatbot")
 
 st.sidebar.title("Configure")
@@ -214,10 +274,9 @@ role = st.sidebar.text_input("Add Role","")
 company_details = st.sidebar.text_input("Give the company details.")
 # welcome_message = st.sidebar.text_input("Welcome chat message for users.")
 
-# st.sidebar.header("Chat Features")
-# enable_voice_dictation = st.sidebar.checkbox('Enable voice dictation', value=False)
-# enable_feedback_flag = st.sidebar.checkbox('Enable feedback flag', value=False)
-# enable_send_to_doc = st.sidebar.checkbox('Enable send to doc', value=False)
+st.sidebar.header("Youtube Transcripts loader")
+enable_ytt = st.sidebar.toggle("Enable Youtube Transcripts", value=False)
+ytt_url = st.sidebar.text_input("Add Youtube Link")
 
 st.sidebar.header("Knowledge Graph")
 enable_knowledge_graph = st.sidebar.toggle("Enable", value=False)
@@ -228,6 +287,14 @@ urls = st.sidebar.text_input("Add URL")
 st.sidebar.header("CSV Loader")
 enable_csv = st.sidebar.toggle("Enable CSV", value=False)
 csv_files = st.sidebar.file_uploader("Upload .csv files only", accept_multiple_files=False)
+
+st.sidebar.header("FAQs")
+enable_faq = st.sidebar.toggle("Enable FAQs", value=False)
+faq_files = st.sidebar.file_uploader("Upload .csv files only with 2 columns (question and answer)", accept_multiple_files=False)
+
+st.sidebar.header("Transcripts Loader")
+enable_ts = st.sidebar.toggle("Enable Transcripts", value=False)
+ts_files = st.sidebar.file_uploader("Upload .csv/.txt file only", accept_multiple_files=False)
 
 st.sidebar.header("Sitemap Loader")
 enable_sitemap = st.sidebar.toggle("Enable Sitemap", value=False)
@@ -250,6 +317,17 @@ if role!="":
     st.sidebar.write(f_role)
 else:
     f_role = ""
+
+if enable_ytt:
+    ytt = youtube_transcripts(ytt_url)
+    try:
+        st.sidebar.write(ytt[0].page_content)
+    except:
+        st.sidebar.write(ytt.page_content)
+    if ytt!="Transcript not found. Try another video URL.":
+        yt_chain = create_rag_chain(ytt)
+    else:
+        st.write("Transcript not found. Try another video URL.")
 
 if url:
     sitemap_urls = extract_sitemap_urls(url)
@@ -290,6 +368,52 @@ if enable_knowledge_graph:
 if enable_csv and csv_files:
         df = pd.read_csv(csv_files)
         agent = csv_query_agent(df)
+
+if enable_ts and ts_files:
+    if '.csv' in ts_files.name:
+        df_t = pd.read_csv(ts_files)
+        temp2 = """
+        You will be given a video transcript in the form of a dataframe.
+        transcript: {transcript}
+        Your task is to analyse the transcript and understand what is there in it and answer the user query.
+        query: {question}
+        Answer the query based on the transcript and your understanding about the transcript.
+        Output should only be the answer and nothing else.
+        """
+        prompt2 = ChatPromptTemplate.from_template(temp2)
+        chain5 = prompt2 | llm
+    elif '.txt' in ts_files.name:
+        # with open(ts_files) as f:
+        #     df_t = f.read()
+        df_t = ts_files.read().decode('utf-8')
+        print(df_t)
+        temp2 = """
+        You will be given a video transcript in the form of text.
+        transcript: {transcript}
+        Your task is to analyse the transcript and understand what is there in it and answer the user query.
+        query: {question}
+        Answer the query based on the transcript and your understanding about the transcript.
+        Output should only be the answer and nothing else.
+        """
+        prompt2 = ChatPromptTemplate.from_template(temp2)
+        chain5 = prompt2 | llm
+
+if enable_faq and faq_files:
+    faq = pd.read_csv(faq_files)
+    examples = ""
+    for i in range(faq.shape[0]):
+        if str(faq["answer"][i])!='nan':
+            examples += "\n\n Question: " + str(faq["question"][i]) + "\n\n Answer: " + str(faq["answer"][i])
+    # print(examples)
+    temp1 = """
+    You will be given a question.
+    question: {question}
+    Answer the question and give only answer as output using the examples below.
+    Example questions: {examples}
+    """
+    prom = ChatPromptTemplate.from_template(temp1)
+    llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
+    chain4 = prom | llm
 
 if enable_knowledge_graph:
     temp = """
@@ -365,7 +489,10 @@ if user_input := st.chat_input("Ask a question"):
     st.chat_message("user").markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    if enable_knowledge_graph and (uploaded_files!=[] or urls!=[] or enable_sitemap):
+    if enable_ytt:
+        res = yt_chain.invoke(user_input)
+        full_res = res
+    elif enable_knowledge_graph and (uploaded_files!=[] or urls!=[] or enable_sitemap):
         if enable_sitemap and url!="":
             sim_url = find_url(sitemap_urls, user_input)
             loader = SeleniumURLLoader([sim_url])
